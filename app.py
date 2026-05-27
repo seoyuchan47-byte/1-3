@@ -1,48 +1,49 @@
-import streamlit as st
-import pandas as pd
-import matplotlib.pyplot as plt
+import os
+from flask import Flask, render_template, request, jsonify
+from google import genai
+from google.genai import types
 
-# 1. 웹앱 제목 설정
-st.title("📊 나만의 심플 데이터 대시보드")
-st.write("오류 없이 작동하는 가장 간단한 스트림릿 앱입니다.")
+app = Flask(__name__)
 
-# 웹앱 구분을 위한 구분선
-st.markdown("---")
+# 환경변수에서 Gemini API 키를 안전하게 가져옵니다.
+API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# 2. 사이드바 레이아웃 추가
-st.sidebar.header("⚙️ 설정 변경")
-user_name = st.sidebar.text_input("당신의 이름을 입력하세요", "홍길동")
-sample_count = st.sidebar.slider("생성할 데이터 개수", min_value=10, max_value=100, value=50)
+if API_KEY:
+    client = genai.Client(api_key=API_KEY)
+else:
+    client = None
 
-# 사이드바 입력값에 따른 환영 인사
-st.subheader(f"👋 반갑습니다, {user_name}님!")
+@app.route('/')
+def home():
+    return render_template('index.html')
 
-# 3. 간단한 샘플 데이터프레임 생성
-# 데이터 개수를 슬라이더 값(sample_count)과 연동하여 동적으로 변하게 만듭니다.
-data = {
-    "점수": [i * 1.5 for i in range(sample_count)],
-    "만족도": [i % 5 + 1 for i in range(sample_count)]
-}
-df = pd.DataFrame(data)
+@app.route('/chat', methods=['POST'])
+def chat():
+    if not client:
+        return jsonify({'error': '서버에 API 키가 설정되지 않았습니다. 환경변수를 확인해주세요!'}), 500
 
-# 4. 데이터 및 차트 시각화
-col1, col2 = st.columns(2)
+    user_message = request.json.get('message', '')
+    if not user_message:
+        return jsonify({'error': '고민 내용을 입력해주세요.'}), 400
 
-with col1:
-    st.write("### 📄 데이터 표")
-    # 데이터프레임을 깔끔하게 보여줍니다.
-    st.dataframe(df, use_container_width=True)
+    try:
+        # 최신 gemini-2.5-flash 모델과 연애 상담가 페르소나 설정
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=user_message,
+            config=types.GenerateContentConfig(
+                system_instruction=(
+                    "당신은 다정하면서도 때로는 뼈를 때리는 20대 친근한 연애 코치 '재미나이'입니다. "
+                    "사용자의 연애 고민(썸, 이별, 짝사랑 등)에 깊이 공감해주되, 친구처럼 친근한 반말로 조언해주세요. "
+                    "이모지를 풍부하게 사용하고, 질질 끄는 관계에는 단호하게 팩트 폭행을 날려주세요."
+                )
+            )
+        )
+        return jsonify({'reply': response.text})
+    except Exception as e:
+        print(f"Error: {e}")
+        return jsonify({'error': '재미나이가 지금 다른 상담 중이라 바빠요. 잠시 후 다시 말 걸어주세요!'}), 500
 
-with col2:
-    st.write("### 📈 데이터 차트")
-    # matplotlib를 활용한 간단한 선 그래프
-    fig, ax = plt.subplots()
-    ax.plot(df["점수"], label="Score", color="dodgerblue")
-    ax.set_title("Score Trend")
-    ax.legend()
-    
-    # 스트림릿에 matplotlib 차트 전달
-    st.pyplot(fig)
-
-st.markdown("---")
-st.success("🎉 앱이 성공적으로 실행되었습니다!")
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
